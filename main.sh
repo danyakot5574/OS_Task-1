@@ -15,11 +15,11 @@ show_help() {
 Использование: $0 [ОПЦИИ]
 
 Доступные аргументы:
-  -u, --users         Вывести список пользователей и их домашние директории
-  -p, --processes     Вывести список запущенных процессов
-  -l PATH, --log PATH Перенаправить стандартный вывод (stdout) в файл PATH
-  -e PATH, --errors PATH Перенаправить поток ошибок (stderr) в файл PATH
-  -h, --help          Вывести эту справку и завершить выполнение
+  -u, --users             Вывести список пользователей и их домашние директории
+  -p, --processes         Вывести список запущенных процессов
+  -l PATH, --log PATH     Перенаправить стандартный вывод (stdout) в файл PATH
+  -e PATH, --errors PATH  Перенаправить поток ошибок (stderr) в файл PATH
+  -h, --help              Вывести эту справку и завершить выполнение
 
 Примеры:
   $0 -u
@@ -34,7 +34,7 @@ check_path_access() {
 
     if [[ "$mode" == "w" ]]; then
         local dir
-        dir=$(dirname "$path")
+        dir=$(dirname -- "$path")
         if [[ ! -d "$dir" || ! -w "$dir" ]]; then
             echo "Ошибка: нет прав на запись в '$dir'" >&2
             exit 1
@@ -49,6 +49,58 @@ check_path_access() {
 
 # ---
 
+LOG_FILE=""
+ERR_FILE=""
+
+args=("$@")
+len=${#args[@]}
+i=0
+while [[ $i -lt $len ]]; do
+    arg="${args[i]}"
+    case "$arg" in
+        -l|--log)
+            next_index=$((i + 1))
+            if [[ $next_index -ge $len ]]; then
+                echo "Ошибка: отсутствует путь для $arg" >&2
+                exit 1
+            fi
+            next="${args[next_index]}"
+            if [[ "$next" == -* ]]; then
+                echo "Ошибка: неверный путь для $arg: '$next'" >&2
+                exit 1
+            fi
+            LOG_FILE="$next"
+            check_path_access "$LOG_FILE" "w"
+            i=$((i + 2))
+            ;;
+        -e|--errors)
+            next_index=$((i + 1))
+            if [[ $next_index -ge $len ]]; then
+                echo "Ошибка: отсутствует путь для $arg" >&2
+                exit 1
+            fi
+            next="${args[next_index]}"
+            if [[ "$next" == -* ]]; then
+                echo "Ошибка: неверный путь для $arg: '$next'" >&2
+                exit 1
+            fi
+            ERR_FILE="$next"
+            check_path_access "$ERR_FILE" "w"
+            i=$((i + 2))
+            ;;
+        *)
+            i=$((i + 1))
+            ;;
+    esac
+done
+
+if [[ -n "$LOG_FILE" ]]; then
+    exec >"$LOG_FILE" || { echo "Ошибка: не могу открыть для записи '$LOG_FILE'" >&2; exit 1; }
+fi
+if [[ -n "$ERR_FILE" ]]; then
+    exec 2>"$ERR_FILE" || { echo "Ошибка: не могу открыть для записи '$ERR_FILE'" >&2; exit 1; }
+fi
+
 TEMP=$(getopt -o upl:e:h --long users,processes,log:,errors:,help -n "$0" -- "$@")
 if [[ $? != 0 ]]; then
     echo "Ошибка: неверные аргументы. Используйте --help для справки." >&2
@@ -57,11 +109,16 @@ fi
 
 eval set -- "$TEMP"
 
-LOG_FILE=""
-ERR_FILE=""
+ACTION=""
 
 while true; do
     case "$1" in
+        -l|--log)
+            shift 2
+            ;;
+        -e|--errors)
+            shift 2
+            ;;
         -u|--users)
             ACTION="users"
             shift
@@ -69,18 +126,6 @@ while true; do
         -p|--processes)
             ACTION="processes"
             shift
-            ;;
-        -l|--log)
-            LOG_FILE="$2"
-            check_path_access "$LOG_FILE" "w"
-            exec >"$LOG_FILE"
-            shift 2
-            ;;
-        -e|--errors)
-            ERR_FILE="$2"
-            check_path_access "$ERR_FILE" "w"
-            exec 2>"$ERR_FILE"
-            shift 2
             ;;
         -h|--help)
             show_help
@@ -109,4 +154,3 @@ case "$ACTION" in
         exit 1
         ;;
 esac
-
